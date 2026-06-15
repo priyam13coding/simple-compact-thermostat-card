@@ -131,10 +131,17 @@ export class SimpleCompactThermostatCard extends LitElement {
     if (outsideEntity
         && oldHass.states[outsideEntity]
            !== this.hass.states[outsideEntity]) return true;
+
+    for (const eid of [this._getCo2Entity(), this._getHumidityEntity()]) {
+      if (eid && oldHass.states[eid] !== this.hass.states[eid]) return true;
+    }
     if (this._config.show_sensor_data !== false) {
       const climate = this.hass.states[this._config.entity];
       for (const s of this._discoverSensors(climate)) {
         if (oldHass.states[s.entity] !== this.hass.states[s.entity]) return true;
+        if (s.occupancyEntity
+            && oldHass.states[s.occupancyEntity]
+               !== this.hass.states[s.occupancyEntity]) return true;
       }
     }
     return false;
@@ -186,13 +193,15 @@ export class SimpleCompactThermostatCard extends LitElement {
           const sensorState = this.hass.states[s.entity];
           const raw = sensorState ? parseFloat(sensorState.state) : NaN;
           const isActive = this._isActiveSensor(s.name, activeList);
+          const occState = s.occupancyEntity ? this.hass.states[s.occupancyEntity] : null;
+          const isOccupied = occState?.state === "on";
           const label = s.short ?? s.name;
           const isLastCol = (i + 1) % cols === 0;
           return html`
             <div
-              class="sensor-cell ${isActive ? "active" : ""}"
+              class="sensor-cell ${isActive ? "active" : ""} ${isOccupied ? "occupied" : ""}"
               style=${isLastCol ? "border-right: none;" : ""}
-              title=${s.name}
+              title=${s.name}${isOccupied ? " (occupied)" : ""}
             >
               <div class="sensor-temp">
                 ${isNaN(raw) ? "—" : this._round(raw)}<span class="sensor-unit">°${unit}</span>
@@ -216,8 +225,11 @@ export class SimpleCompactThermostatCard extends LitElement {
       (this._config.sensor_excludes ?? []).map(s => s.toLowerCase())
     );
     const aliases = this._config.sensor_aliases ?? {};
+    const occupancyOverrides = this._config.sensor_occupancy ?? {};
     const candidates = this._findRelatedTempSensors(this._config.entity);
+    const occCandidates = this._findRelatedOccupancySensors(this._config.entity);
     const used = new Set<string>();
+    const usedOcc = new Set<string>();
     const result: DiscoveredSensor[] = [];
 
     for (const item of available) {
@@ -228,9 +240,72 @@ export class SimpleCompactThermostatCard extends LitElement {
       const entityId = this._matchSensorByName(name, candidates, used);
       if (!entityId) continue;
       used.add(entityId);
-      result.push({ name, entity: entityId, short: aliases[name] });
+
+      let occupancyEntity: string | undefined;
+      if (occupancyOverrides[name]) {
+        occupancyEntity = occupancyOverrides[name];
+      } else {
+        const matched = this._matchOccupancySensor(name, occCandidates, usedOcc);
+        if (matched) {
+          usedOcc.add(matched);
+          occupancyEntity = matched;
+        }
+      }
+
+      result.push({ name, entity: entityId, short: aliases[name], occupancyEntity });
     }
     return result;
+  }
+
+  // Find binary_sensor entities with device_class=occupancy on the same device
+  // as the climate entity (or any if the registry is unavailable).
+  private _findRelatedOccupancySensors(climateId: string): string[] {
+    const reg = (this.hass as any).entities as
+      | Record<string, { device_id?: string }>
+      | undefined;
+
+    const isOccSensor = (eid: string): boolean => {
+      if (!eid.startsWith("binary_sensor.")) return false;
+      const st = this.hass.states[eid];
+      if (!st) return false;
+      return st.attributes.device_class === "occupancy"
+          || eid.endsWith("_occupancy");
+    };
+
+    if (reg) {
+      const climate = reg[climateId];
+      const deviceId = climate?.device_id;
+      if (deviceId) {
+        return Object.keys(reg).filter(
+          eid => reg[eid].device_id === deviceId && isOccSensor(eid)
+        );
+      }
+    }
+    return Object.keys(this.hass.states).filter(isOccSensor);
+  }
+
+  private _matchOccupancySensor(
+    name: string,
+    candidates: string[],
+    used: Set<string>,
+  ): string | null {
+    const wanted = name.toLowerCase();
+
+    // 1. friendly_name match — "Guest Bedroom Occupancy" → "Guest Bedroom"
+    for (const eid of candidates) {
+      if (used.has(eid)) continue;
+      const fn = (this.hass.states[eid]?.attributes?.friendly_name ?? "").toLowerCase();
+      if (fn === wanted
+          || fn === `${wanted} occupancy`
+          || fn.startsWith(`${wanted} `)) return eid;
+    }
+    // 2. Slug-based entity_id with _2/_3 disambiguation
+    const slug = wanted.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    for (const suffix of ["_occupancy", "_occupancy_2", "_occupancy_3"]) {
+      const eid = `binary_sensor.${slug}${suffix}`;
+      if (this.hass.states[eid] && !used.has(eid)) return eid;
+    }
+    return null;
   }
 
   private _parseSensorItem(item: any): { name: string; id: string } {
@@ -340,6 +415,76 @@ export class SimpleCompactThermostatCard extends LitElement {
     return this._readTempFromEntity(eid);
   }
 
+  // CO2 / humidity sub-stat helpers — same auto-discovery pattern: explicit
+  // config wins, else find a sensor with the matching device_class on the
+  // same device as the climate entity.
+  private _getCo2Entity(): string | null {
+    if (this._config.co2_entity) return this._config.co2_entity;
+    return this._findSensorByDeviceClass("carbon_dioxide");
+  }
+
+  private _getHumidityEntity(): string | null {
+    if (this._config.humidity_entity) return this._config.humidity_entity;
+    return this._findSensorByDeviceClass("humidity");
+  }
+
+  private _findSensorByDeviceClass(deviceClass: string): string | null {
+    const reg = (this.hass as any).entities as
+      | Record<string, { device_id?: string }>
+      | undefined;
+    if (!reg) return null;
+    const climate = reg[this._config.entity];
+    const deviceId = climate?.device_id;
+    if (!deviceId) return null;
+
+    for (const eid of Object.keys(reg)) {
+      if (!eid.startsWith("sensor.")) continue;
+      if (reg[eid].device_id !== deviceId) continue;
+      const st = this.hass.states[eid];
+      if (st?.attributes?.device_class === deviceClass) return eid;
+    }
+    return null;
+  }
+
+  private _renderSubStats(): TemplateResult | typeof nothing {
+    const co2Entity = this._config.show_co2 === false ? null : this._getCo2Entity();
+    const humEntity = this._config.show_humidity === false ? null : this._getHumidityEntity();
+
+    const co2State = co2Entity ? this.hass.states[co2Entity] : null;
+    const humState = humEntity ? this.hass.states[humEntity] : null;
+
+    const co2Value = co2State ? parseFloat(co2State.state) : NaN;
+    const humValue = humState ? parseFloat(humState.state) : NaN;
+
+    const hasCo2 = !isNaN(co2Value);
+    const hasHum = !isNaN(humValue);
+    if (!hasCo2 && !hasHum) return nothing;
+
+    const co2Threshold = this._config.co2_warning_threshold ?? 1000;
+    const humThreshold = this._config.humidity_warning_threshold ?? 60;
+
+    const co2Warn = hasCo2 && co2Value > co2Threshold;
+    const humWarn = hasHum && humValue > humThreshold;
+
+    const co2Unit = co2State?.attributes?.unit_of_measurement ?? "ppm";
+    const humUnit = humState?.attributes?.unit_of_measurement ?? "%";
+
+    return html`
+      <div class="sub-stats">
+        ${hasCo2 ? html`
+          <span class="stat ${co2Warn ? "warn" : ""}">
+            CO₂ ${this._round(co2Value)}<span class="stat-unit"> ${co2Unit}</span>
+          </span>
+        ` : nothing}
+        ${hasHum ? html`
+          <span class="stat ${humWarn ? "warn" : ""}">
+            ${this._round(humValue)}<span class="stat-unit">${humUnit}</span> RH
+          </span>
+        ` : nothing}
+      </div>
+    `;
+  }
+
   // Reads a temperature value from either a weather entity (attributes.temperature)
   // or any other entity (state).
   private _readTempFromEntity(entityId: string): number | null {
@@ -409,6 +554,7 @@ export class SimpleCompactThermostatCard extends LitElement {
           <div class="big-temp">
             ${current != null ? this._round(current) : "—"}<span class="big-unit">°${unit}</span>
           </div>
+          ${this._renderSubStats()}
         </div>
 
         <div class="adjust-cell">
@@ -829,6 +975,30 @@ export class SimpleCompactThermostatCard extends LitElement {
       font-family: inherit;
     }
 
+    /* CO2 + humidity row under the current temperature */
+    .sub-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 6px;
+      align-items: baseline;
+    }
+    .stat {
+      font-size: 11px;
+      color: var(--sct-text-secondary);
+      font-family: var(--sct-mono);
+      white-space: nowrap;
+      line-height: 1.2;
+    }
+    .stat-unit {
+      font-size: 0.78em;
+      opacity: 0.7;
+    }
+    .stat.warn {
+      color: var(--error-color, #f44336);
+      font-weight: 600;
+    }
+
     .adjust-cell {
       display: flex;
       flex-direction: column;
@@ -1009,6 +1179,8 @@ export class SimpleCompactThermostatCard extends LitElement {
       gap: 10px;
       padding: 10px 14px;
       position: relative;
+      min-width: 0;        /* override grid's default min-width:auto so the column can shrink */
+      overflow: visible;   /* don't clip the preset popup */
     }
     .control-cell .micro-label {
       margin-bottom: 0;
@@ -1104,9 +1276,12 @@ export class SimpleCompactThermostatCard extends LitElement {
       display: flex;
       gap: 6px;
       flex: 1;
+      flex-wrap: wrap;
+      min-width: 0;
     }
     .fan-btn {
-      flex: 1;
+      flex: 1 1 auto;
+      min-width: 0;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1179,6 +1354,10 @@ export class SimpleCompactThermostatCard extends LitElement {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    .sensor-cell.occupied .sensor-name {
+      color: var(--sct-text-primary);
+      font-weight: 700;
     }
   `;
 }

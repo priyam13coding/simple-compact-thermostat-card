@@ -87,6 +87,13 @@ Everything else — outside temp, room sensors, preset list, fan modes — is di
 | `room_sensor_columns` | number    | `4`                        | Number of columns in the room-sensor grid.                        |
 | `sensor_excludes`     | string[]  | `["Thermostat"]`           | Sensor names to skip in the room-sensor row.                      |
 | `sensor_aliases`      | object    | `{}`                       | `{ "Original Name": "Short Label" }` to rename a cell.            |
+| `sensor_occupancy`    | object    | `{}`                       | `{ "Original Name": "binary_sensor.x_occupancy" }` to manually map a sensor to its occupancy binary_sensor. Auto-discovered if omitted. |
+| `co2_entity`          | string    | (auto)                     | A `sensor.*` for CO₂ ppm. Defaults to the sensor with `device_class: carbon_dioxide` on the same device as the climate entity. |
+| `humidity_entity`     | string    | (auto)                     | A `sensor.*` for relative humidity. Defaults to the sensor with `device_class: humidity` on the same device. |
+| `show_co2`            | boolean   | `true`                     | Set `false` to hide the CO₂ stat even when one is found.          |
+| `show_humidity`       | boolean   | `true`                     | Set `false` to hide the humidity stat even when one is found.     |
+| `co2_warning_threshold` | number  | `1000`                     | CO₂ value (in the sensor's unit, normally ppm) above which the number renders red. |
+| `humidity_warning_threshold` | number | `60`                  | Humidity % above which the number renders red.                    |
 
 ### Full example
 

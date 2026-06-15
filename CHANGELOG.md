@@ -4,7 +4,16 @@ All notable changes to **Simple Compact Thermostat** are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
-## [0.2.0] — Unreleased
+## [0.3.0] — 2026-06-15
+
+### Added
+- **Occupancy detection.** Auto-discovers the `binary_sensor` with `device_class: occupancy` matched to each room sensor; bolds the room name when occupied. New `sensor_occupancy` YAML option for manual mapping.
+- **CO₂ and humidity sub-stats.** Auto-discovered from sensors with `device_class: carbon_dioxide` and `device_class: humidity` on the same device as the climate entity. Rendered below the current temperature; values turn red when above configurable thresholds (`co2_warning_threshold` default 1000 ppm, `humidity_warning_threshold` default 60%).
+
+### Fixed
+- Fan buttons could overflow the FAN cell when the label + two buttons didn't fit. Grid items now have `min-width: 0` and the buttons wrap to a second row if needed.
+
+## [0.2.0] — 2026-06-12
 
 ### Added
 - Three-row compact layout: status header, main display panel with `+`/`−` setpoint chips, HVAC mode strip, and a control row with preset dropdown + fan buttons.
