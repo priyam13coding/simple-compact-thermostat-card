@@ -33,6 +33,7 @@ A clean, information-dense thermostat card for Home Assistant — three compact 
 | **🎯 "Custom" preset state** | When you manually override a named preset (e.g. by adjusting the temperature on Home), the preset label flips to *Custom* so you know you're off-script. |
 | **🌗 Theme-aware** | Uses Home Assistant theme variables for surfaces and text; mode colors flow through `--sct-*` CSS variables so any theme or `card-mod` can recolor freely. |
 | **♿ Accessible** | All interactive controls are real `<button>` elements with proper aria-labels and keyboard support. |
+| **🛠️ GUI editor** | Add the card via the dashboard editor and you get a visual form for the common options. Advanced options stay in YAML for full control. |
 
 ---
 

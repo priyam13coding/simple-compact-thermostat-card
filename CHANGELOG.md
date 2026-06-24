@@ -4,6 +4,12 @@ All notable changes to **Simple Compact Thermostat** are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — Unreleased
+
+### Added
+- **GUI editor.** When the card is added or edited via the dashboard, a visual form replaces the YAML editor by default. Covers the simple options — entity pickers, toggles, numbers, the air-quality sensor section. Resolves [#1](https://github.com/priyam13coding/simple-compact-thermostat-card/issues/1).
+  Advanced options (`room_sensors`, `sensor_aliases`, `sensor_occupancy`, `sensor_excludes`, `hvac_modes`, `fan_modes`) stay YAML-only — use the **Show Code Editor** toggle for those.
+
 ## [0.3.2] — 2026-06-17
 
 ### Fixed
@@ -57,6 +63,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Heat and cool setpoints in dual mode move together with `+`/`−`. Independent control is planned for a future release.
 - The card relies on the climate entity's `available_sensors` attribute for the room-sensor row. Integrations that don't expose this won't show the row.
 
+[0.4.0]: https://github.com/priyam13coding/simple-compact-thermostat-card/releases/tag/v0.4.0
 [0.3.2]: https://github.com/priyam13coding/simple-compact-thermostat-card/releases/tag/v0.3.2
 [0.3.1]: https://github.com/priyam13coding/simple-compact-thermostat-card/releases/tag/v0.3.1
 [0.3.0]: https://github.com/priyam13coding/simple-compact-thermostat-card/releases/tag/v0.3.0

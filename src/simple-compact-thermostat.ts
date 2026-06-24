@@ -12,12 +12,20 @@ import {
 } from "./const";
 import { DiscoveredSensor, SimpleCompactThermostatConfig } from "./types";
 
+// Side-effect import: registers <simple-compact-thermostat-editor> so the
+// dashboard editor can find it via getConfigElement() below. We do this here
+// (instead of dynamic import) because terser strips dead code aggressively
+// from @customElement-decorated classes that aren't otherwise referenced.
+import "./editor";
+
 // Register the card so it shows up in the Lovelace card picker.
 (window as any).customCards = (window as any).customCards || [];
 (window as any).customCards.push({
   type: CARD_NAME,
   name: "Simple Compact Thermostat",
   description: "A compact thermostat card with HVAC, preset, and fan controls.",
+  preview: false,
+  documentationURL: "https://github.com/priyam13coding/simple-compact-thermostat-card",
 });
 
 /* eslint-disable no-console */
@@ -48,6 +56,22 @@ export class SimpleCompactThermostatCard extends LitElement {
   } = {};
 
   private static readonly STALE_MS = 5 * 60 * 1000;
+
+  // Tells Lovelace to use our custom editor element when the user clicks the
+  // card's pencil icon in the dashboard editor.
+  public static getConfigElement(): HTMLElement {
+    return document.createElement(`${CARD_NAME}-editor`);
+  }
+
+  // Initial config when the card is added via the dashboard picker — picks the
+  // first climate.* entity if one exists.
+  public static getStubConfig(
+    _hass: HomeAssistant,
+    entities: string[],
+  ): Partial<SimpleCompactThermostatConfig> {
+    const climate = entities.find(e => e.startsWith("climate."));
+    return { entity: climate ?? "climate.your_thermostat" };
+  }
 
   public setConfig(config: SimpleCompactThermostatConfig): void {
     if (!config) throw new Error("Invalid configuration");
