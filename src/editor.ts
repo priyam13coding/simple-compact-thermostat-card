@@ -100,6 +100,18 @@ const DEFAULTS: Record<string, unknown> = {
   humidity_warning_threshold:   60,
 };
 
+// Config keys we don't expose in the simple form — they're objects/arrays.
+// Surfaced via an embedded ha-yaml-editor so the user doesn't have to switch
+// to the full "Show Code Editor" view just for these.
+const ADVANCED_KEYS = [
+  "room_sensors",
+  "sensor_aliases",
+  "sensor_occupancy",
+  "sensor_excludes",
+  "hvac_modes",
+  "fan_modes",
+] as const;
+
 @customElement(EDITOR_NAME)
 export class SimpleCompactThermostatEditor extends LitElement {
   @property({ attribute: false }) public hass!: HomeAssistant;
@@ -109,14 +121,75 @@ export class SimpleCompactThermostatEditor extends LitElement {
     this._config = config;
   }
 
+  // Replicate the card's runtime auto-discovery for outside temp, CO₂ and
+  // humidity so the editor can prepopulate those entity pickers with whatever
+  // the card is actually using right now. Same matching rules: weather.* and
+  // device-class sensors on the climate entity's device.
+  private _autoDiscovered(): Record<string, string> {
+    const out: Record<string, string> = {};
+    if (!this.hass || !this._config?.entity) return out;
+    const climateId = this._config.entity;
+
+    const reg = (this.hass as any).entities as
+      | Record<string, { device_id?: string }>
+      | undefined;
+
+    if (reg) {
+      const deviceId = reg[climateId]?.device_id;
+      if (deviceId) {
+        for (const eid of Object.keys(reg)) {
+          if (reg[eid].device_id !== deviceId) continue;
+          const st = this.hass.states[eid];
+          if (!st) continue;
+
+          if (!out.outside_temp_entity && eid.startsWith("weather.")) {
+            out.outside_temp_entity = eid;
+          }
+          if (!out.co2_entity
+              && eid.startsWith("sensor.")
+              && st.attributes.device_class === "carbon_dioxide") {
+            out.co2_entity = eid;
+          }
+          if (!out.humidity_entity
+              && eid.startsWith("sensor.")
+              && st.attributes.device_class === "humidity") {
+            out.humidity_entity = eid;
+          }
+        }
+      }
+    }
+
+    // Fallback for outside temp: weather.<climate-slug>
+    if (!out.outside_temp_entity) {
+      const slug = climateId.split(".")[1];
+      const fallback = `weather.${slug}`;
+      if (this.hass.states[fallback]) {
+        out.outside_temp_entity = fallback;
+      }
+    }
+
+    return out;
+  }
+
+  // Subset of config containing only the advanced fields, used as the initial
+  // value of the embedded ha-yaml-editor.
+  private _advancedConfig(): Record<string, unknown> {
+    const adv: Record<string, unknown> = {};
+    if (!this._config) return adv;
+    for (const k of ADVANCED_KEYS) {
+      if ((this._config as any)[k] !== undefined) {
+        adv[k] = (this._config as any)[k];
+      }
+    }
+    return adv;
+  }
+
   protected render(): TemplateResult {
     if (!this.hass || !this._config) return html``;
 
-    // Show effective values: user's config wins, defaults fill the gaps.
-    // This way the form prepopulates with the runtime state (e.g. show_preset
-    // toggle reads ON when the YAML doesn't set it, matching how the card
-    // actually behaves) instead of showing toggles as unchecked / numbers blank.
-    const displayData = { ...DEFAULTS, ...this._config };
+    // Display data: user config wins over auto-discovery wins over defaults.
+    const auto = this._autoDiscovered();
+    const displayData = { ...DEFAULTS, ...auto, ...this._config };
 
     return html`
       <ha-form
@@ -127,11 +200,17 @@ export class SimpleCompactThermostatEditor extends LitElement {
         @value-changed=${this._valueChanged}
       ></ha-form>
 
-      <div class="hint">
-        <strong>Advanced options</strong> — <code>room_sensors</code>,
-        <code>sensor_aliases</code>, <code>sensor_occupancy</code>,
-        <code>sensor_excludes</code>, <code>hvac_modes</code>, <code>fan_modes</code>
-        — switch to <em>Show Code Editor</em> to edit them.
+      <div class="advanced">
+        <div class="advanced-title">Advanced YAML</div>
+        <div class="advanced-desc">
+          <code>room_sensors</code>, <code>sensor_aliases</code>,
+          <code>sensor_occupancy</code>, <code>sensor_excludes</code>,
+          <code>hvac_modes</code>, <code>fan_modes</code>
+        </div>
+        <ha-yaml-editor
+          .defaultValue=${this._advancedConfig()}
+          @value-changed=${this._advancedChanged}
+        ></ha-yaml-editor>
       </div>
     `;
   }
@@ -158,6 +237,34 @@ export class SimpleCompactThermostatEditor extends LitElement {
       }
     }
 
+    // Strip values that match what auto-discovery would have found anyway,
+    // so user can replace the thermostat later without YAML breaking.
+    for (const [k, autoVal] of Object.entries(this._autoDiscovered())) {
+      if (merged[k] === autoVal) {
+        delete merged[k];
+      }
+    }
+
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail:   { config: merged },
+        bubbles:  true,
+        composed: true,
+      }),
+    );
+  };
+
+  private _advancedChanged = (e: CustomEvent): void => {
+    if (e.detail.isValid === false) return;   // wait until the YAML parses
+    const adv = (e.detail.value ?? {}) as Record<string, unknown>;
+
+    const merged: any = { ...this._config };
+    // Remove existing advanced keys, then add whatever's in the YAML now.
+    for (const k of ADVANCED_KEYS) {
+      delete merged[k];
+    }
+    Object.assign(merged, adv);
+
     this.dispatchEvent(
       new CustomEvent("config-changed", {
         detail:   { config: merged },
@@ -171,17 +278,26 @@ export class SimpleCompactThermostatEditor extends LitElement {
     :host {
       display: block;
     }
-    .hint {
-      margin-top: 16px;
-      padding: 10px 12px;
-      font-size: 12px;
-      line-height: 1.5;
-      color: var(--secondary-text-color);
+    .advanced {
+      margin-top: 18px;
+      padding: 12px;
       background: var(--secondary-background-color);
-      border-radius: 8px;
       border: 1px solid var(--divider-color);
+      border-radius: 8px;
     }
-    .hint code {
+    .advanced-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--primary-text-color);
+      margin-bottom: 4px;
+    }
+    .advanced-desc {
+      font-size: 11px;
+      color: var(--secondary-text-color);
+      line-height: 1.6;
+      margin-bottom: 10px;
+    }
+    .advanced-desc code {
       font-family: var(--code-font-family, ui-monospace, "Roboto Mono", monospace);
       font-size: 11px;
       padding: 1px 5px;
@@ -189,8 +305,8 @@ export class SimpleCompactThermostatEditor extends LitElement {
       color: var(--primary-text-color);
       border-radius: 4px;
     }
-    .hint strong {
-      color: var(--primary-text-color);
+    ha-yaml-editor {
+      display: block;
     }
   `;
 }
