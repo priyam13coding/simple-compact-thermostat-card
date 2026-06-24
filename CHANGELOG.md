@@ -4,7 +4,7 @@ All notable changes to **Simple Compact Thermostat** are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
-## [0.4.0] — Unreleased
+## [0.4.0] — 2026-06-24
 
 ### Added
 - **GUI editor.** When the card is added or edited via the dashboard, a visual form replaces the YAML editor by default. Covers the simple options — entity pickers, toggles, numbers, the air-quality sensor section. Resolves [#1](https://github.com/priyam13coding/simple-compact-thermostat-card/issues/1).
